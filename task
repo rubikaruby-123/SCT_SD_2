@@ -1,0 +1,390 @@
+import customtkinter as ctk
+import tkinter as tk
+from tkinter import ttk
+import random
+import pyttsx3
+import json
+import os
+import threading
+import time
+import matplotlib.pyplot as plt
+from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
+
+# Color Palette Config
+BG = "#0D1117"
+CARD = "#161B22"
+PINK = "#FF00FF"
+CYAN = "#00F5FF"
+GREEN = "#00FF99"
+TEXT = "#FFFFFF"
+RED = "#FF3366"
+ACCENT = "#21262D"
+
+ctk.set_appearance_mode("Dark")
+ctk.set_default_color_theme("blue")
+
+class CyberGuess(ctk.CTk):
+    def __init__(self):
+        super().__init__()
+
+        self.title("⚡ Cyber Guess X - Ultimate Edition")
+        self.geometry("1100xr750")
+        self.minimum_size = (1100, 750)
+        self.configure(fg_color=BG)
+
+        # Game State Variables
+        self.attempts = 0
+        self.max_attempts = 10
+        self.difficulty = "Medium"
+        self.lang = "English"
+        self.score_file = "cyber_stats.json"
+        
+        # Load local storage
+        self.load_stats()
+        
+        # Localization Dictionary
+        self.languages = {
+            "English": {
+                "title": "⚡ CYBER GUESS X ⚡",
+                "guess": "Guess Number",
+                "check": "Check Guess",
+                "restart": "Restart",
+                "correct": "Correct Guess!",
+                "low": "Too Low",
+                "high": "Too High",
+                "invalid": "Invalid Input",
+                "attempts": "Attempts",
+                "leaderboard": "🏆 Top 10 Leaderboard",
+                "history": "📜 Session Logs",
+                "analytics": "📈 Performance Analytics"
+            },
+            "Tamil": {
+                "title": "⚡ சைபர் கெஸ் X ⚡",
+                "guess": "எண்ணை யூகிக்கவும்",
+                "check": "சரி பார்க்க",
+                "restart": "மீண்டும் தொடங்கு",
+                "correct": "சரியான பதில்!",
+                "low": "குறைவாக உள்ளது",
+                "high": "அதிகமாக உள்ளது",
+                "invalid": "தவறான உள்ளீடு",
+                "attempts": "முயற்சிகள்",
+                "leaderboard": "🏆 டாப் 10 சாதனையாளர்கள்",
+                "history": "📜 அமர்வு வரலாறு",
+                "analytics": "📈 செயல்திறன் பகுப்பாய்வு"
+            }
+        }
+
+        # Threaded Text-to-Speech Engine
+        try:
+            self.speech_queue = []
+            self.tts_thread = threading.Thread(target=self._tts_worker, daemon=True)
+            self.tts_thread.start()
+        except Exception:
+            self.speech_queue = None
+
+        self.setup_game_parameters()
+        self.build_ui()
+        self.animate_title()
+        self.update_analytics()
+
+    def load_stats(self):
+        if os.path.exists(self.score_file):
+            try:
+                with open(self.score_file, 'r') as f:
+                    data = json.load(f)
+                    self.leaderboard = data.get("leaderboard", [])
+                    self.history_data = data.get("history", [])
+            except:
+                self.leaderboard = []
+                self.history_data = []
+        else:
+            self.leaderboard = []
+            self.history_data = []
+
+    def save_stats(self):
+        with open(self.score_file, 'w') as f:
+            json.dump({"leaderboard": self.leaderboard, "history": self.history_data}, f, indent=4)
+
+    def _tts_worker(self):
+        engine = pyttsx3.init()
+        while True:
+            if self.speech_queue:
+                msg = self.speech_queue.pop(0)
+                try:
+                    engine.say(msg)
+                    engine.runAndWait()
+                except:
+                    pass
+            time.sleep(0.1)
+
+    def speak(self, msg):
+        if self.speech_queue is not None:
+            self.speech_queue.append(msg)
+
+    def setup_game_parameters(self):
+        self.difficulty = self.diff.get() if hasattr(self, 'diff') else "Medium"
+        if self.difficulty == "Easy":
+            self.range_max = 50
+            self.max_attempts = 5
+        elif self.difficulty == "Medium":
+            self.range_max = 100
+            self.max_attempts = 10
+        else:
+            self.range_max = 200
+            self.max_attempts = 15
+        
+        self.secret = random.randint(1, self.range_max)
+        self.attempts = 0
+
+    def build_ui(self):
+        # Layout splitting: Left Control Area, Right Visual Panels
+        self.grid_columnconfigure(0, weight=4)
+        self.grid_columnconfigure(1, weight=5)
+        self.grid_rowconfigure(0, weight=1)
+
+        # ================= LEFT SIDE FRAME =================
+        left_panel = ctk.CTkFrame(self, fg_color=BG)
+        left_panel.grid(row=0, column=0, sticky="nsew", padx=20, pady=20)
+
+        self.title_lbl = ctk.CTkLabel(
+            left_panel, text=self.languages[self.lang]["title"],
+            font=("Arial", 32, "bold"), text_color=PINK
+        )
+        self.title_lbl.pack(pady=15)
+
+        # Control Row (Difficulty and Language Dropdowns)
+        ctrl_frame = ctk.CTkFrame(left_panel, fg_color=CARD, corner_radius=12)
+        ctrl_frame.pack(fill="x", padx=10, pady=10)
+
+        self.diff = ctk.CTkOptionMenu(
+            ctrl_frame, values=["Easy", "Medium", "Hard"],
+            command=lambda v: self.restart(), fg_color=ACCENT, button_color=PINK, button_hover_color="#D946EF"
+        )
+        self.diff.set("Medium")
+        self.diff.pack(side="left", padx=15, pady=15)
+
+        self.language_menu = ctk.CTkOptionMenu(
+            ctrl_frame, values=["English", "Tamil"],
+            command=self.change_lang, fg_color=ACCENT, button_color=CYAN, button_hover_color="#00C5DD"
+        )
+        self.language_menu.pack(side="right", padx=15, pady=15)
+
+        # Game Core Interactivity Card
+        game_card = ctk.CTkFrame(left_panel, fg_color=CARD, corner_radius=16)
+        game_card.pack(fill="both", expand=True, padx=10, pady=10)
+
+        self.hint_lbl = ctk.CTkLabel(
+            game_card, text=f"Enter a number between 1 and {self.range_max}",
+            font=("Arial", 16), text_color=TEXT
+        )
+        self.hint_lbl.pack(pady=15)
+
+        self.entry = ctk.CTkEntry(
+            game_card, width=220, height=50, font=("Arial", 24, "bold"),
+            justify="center", fg_color=BG, border_color=PINK, text_color=CYAN
+        )
+        self.entry.pack(pady=10)
+        self.entry.bind("<Return>", lambda e: self.check())
+
+        self.button = ctk.CTkButton(
+            game_card, text=self.languages[self.lang]["check"],
+            fg_color=PINK, hover_color="#D946EF", font=("Arial", 16, "bold"),
+            text_color=TEXT, height=45, command=self.check
+        )
+        self.button.pack(pady=15)
+
+        self.progress = ctk.CTkProgressBar(game_card, width=380, progress_color=CYAN, fg_color=BG)
+        self.progress.pack(pady=15)
+        self.progress.set(0)
+
+        self.result = ctk.CTkLabel(game_card, text="", font=("Arial", 22, "bold"))
+        self.result.pack(pady=10)
+
+        self.attempt_label = ctk.CTkLabel(
+            game_card, text=f"{self.languages[self.lang]['attempts']} : 0 / {self.max_attempts}",
+            font=("Arial", 15, "italic"), text_color=TEXT
+        )
+        self.attempt_label.pack(pady=5)
+
+        self.restart_btn = ctk.CTkButton(
+            game_card, text=self.languages[self.lang]["restart"],
+            fg_color=CYAN, hover_color="#00C5DD", text_color="black",
+            font=("Arial", 15, "bold"), height=40, command=self.restart
+        )
+        self.restart_btn.pack(pady=20)
+
+        # ================= RIGHT SIDE PANEL (TABBED DATA) =================
+        right_panel = ctk.CTkFrame(self, fg_color=CARD, corner_radius=16)
+        right_panel.grid(row=0, column=1, sticky="nsew", padx=20, pady=20)
+        
+        self.tabs = ctk.CTkTabview(right_panel, segmented_button_selected_color=PINK, segmented_button_unselected_color=ACCENT)
+        self.tabs.pack(fill="both", expand=True, padx=10, pady=10)
+        
+        self.tab_leaderboard = self.tabs.add(self.languages[self.lang]["leaderboard"])
+        self.tab_history = self.tabs.add(self.languages[self.lang]["history"])
+        self.tab_analytics = self.tabs.add(self.languages[self.lang]["analytics"])
+
+        self.setup_leaderboard_ui()
+        self.setup_history_ui()
+        self.setup_analytics_ui()
+
+    def setup_leaderboard_ui(self):
+        self.lead_textbox = ctk.CTkTextbox(self.tab_leaderboard, fg_color=BG, font=("Courier New", 15), text_color=GREEN)
+        self.lead_textbox.pack(fill="both", expand=True, padx=10, pady=10)
+        self.update_leaderboard_view()
+
+    def setup_history_ui(self):
+        self.history_textbox = ctk.CTkTextbox(self.tab_history, fg_color=BG, font=("Courier New", 14), text_color=TEXT)
+        self.history_textbox.pack(fill="both", expand=True, padx=10, pady=10)
+        self.update_history_view()
+
+    def setup_analytics_ui(self):
+        self.fig, self.ax = plt.subplots(figsize=(4, 3), facecolor=CARD)
+        self.ax.set_facecolor(BG)
+        self.ax.tick_params(colors=TEXT)
+        self.ax.spines['bottom'].set_color(ACCENT)
+        self.ax.spines['left'].set_color(ACCENT)
+        self.ax.spines['top'].set_visible(False)
+        self.ax.spines['right'].set_visible(False)
+        
+        self.canvas = FigureCanvasTkAgg(self.fig, master=self.tab_analytics)
+        self.canvas.get_tk_widget().pack(fill="both", expand=True, padx=10, pady=10)
+
+    def change_lang(self, val):
+        self.lang = val
+        data = self.languages[val]
+        self.title_lbl.configure(text=data["title"])
+        self.button.configure(text=data["check"])
+        self.restart_btn.configure(text=data["restart"])
+        self.attempt_label.configure(text=f"{data['attempts']} : {self.attempts} / {self.max_attempts}")
+        self.hint_lbl.configure(text=f"Enter a number between 1 and {self.range_max}")
+        
+        # Update tab names safely
+        self.tabs._segmented_button._buttons_dict[list(self.tabs._segmented_button._buttons_dict.keys())[0]].configure(text=data["leaderboard"])
+        self.tabs._segmented_button._buttons_dict[list(self.tabs._segmented_button._buttons_dict.keys())[1]].configure(text=data["history"])
+        self.tabs._segmented_button._buttons_dict[list(self.tabs._segmented_button._buttons_dict.keys())[2]].configure(text=data["analytics"])
+
+    def check(self):
+        try:
+            g = int(self.entry.get())
+            self.attempts += 1
+            progress_val = min(self.attempts / self.max_attempts, 1.0)
+            self.progress.set(progress_val)
+            self.attempt_label.configure(text=f"{self.languages[self.lang]['attempts']} : {self.attempts} / {self.max_attempts}")
+
+            if g < self.secret:
+                self.result.configure(text=self.languages[self.lang]["low"], text_color=CYAN)
+                self.log_history(f"Guessed {g} -> Too Low")
+                if self.attempts >= self.max_attempts:
+                    self.game_over(victory=False)
+                else:
+                    self.speak("Too Low")
+            elif g > self.secret:
+                self.result.configure(text=self.languages[self.lang]["high"], text_color=RED)
+                self.log_history(f"Guessed {g} -> Too High")
+                if self.attempts >= self.max_attempts:
+                    self.game_over(victory=False)
+                else:
+                    self.speak("Too High")
+            else:
+                self.game_over(victory=True)
+
+            self.entry.delete(0, "end")
+        except ValueError:
+            self.result.configure(text=self.languages[self.lang]["invalid"], text_color="orange")
+
+    def game_over(self, victory):
+        self.entry.configure(state="disabled")
+        self.button.configure(state="disabled")
+        
+        if victory:
+            self.result.configure(text=self.languages[self.lang]["correct"], text_color=GREEN)
+            self.log_history(f"🎉 Correct! Secret was {self.secret} in {self.attempts} attempts.")
+            self.speak("Congratulations! Awesome job.")
+            
+            # Save stats
+            self.leaderboard.append(self.attempts)
+            self.leaderboard = sorted(self.leaderboard)[:10]
+            self.history_data.append({"target": self.secret, "attempts": self.attempts, "outcome": "Win"})
+            self.trigger_victory_effect()
+        else:
+            self.result.configure(text=f"💥 Game Over! Answer: {self.secret}", text_color=RED)
+            self.log_history(f"❌ Failed to guess {self.secret} within limits.")
+            self.speak("Game over. Try again.")
+            self.history_data.append({"target": self.secret, "attempts": self.attempts, "outcome": "Loss"})
+            
+        self.save_stats()
+        self.update_leaderboard_view()
+        self.update_analytics()
+
+    def trigger_victory_effect(self):
+        # Flashes game window metrics or titles rapidly for a retro cyber feel
+        def flash(count):
+            if count > 0:
+                current_color = self.result.cget("text_color")
+                self.result.configure(text_color=PINK if current_color == GREEN else GREEN)
+                self.after(150, lambda: flash(count - 1))
+            else:
+                self.result.configure(text_color=GREEN)
+        flash(12)
+
+    def log_history(self, event_str):
+        self.history_textbox.configure(state="normal")
+        self.history_textbox.insert("end", f"[{self.difficulty}] {event_str}\n")
+        self.history_textbox.see("end")
+        self.history_textbox.configure(state="disabled")
+
+    def update_leaderboard_view(self):
+        self.lead_textbox.configure(state="normal")
+        self.lead_textbox.delete("1.0", "end")
+        self.lead_textbox.insert("end", " RANK   ATTEMPTS TO WIN\n")
+        self.lead_textbox.insert("end", "========================\n")
+        for idx, score in enumerate(self.leaderboard):
+            self.lead_textbox.insert(end=f"  #{idx+1:<5} {score} attempts\n")
+        self.lead_textbox.configure(state="disabled")
+
+    def update_history_view(self):
+        self.history_textbox.configure(state="normal")
+        self.history_textbox.delete("1.0", "end")
+        for entry in self.history_data:
+            outcome_symbol = "🏆" if entry["outcome"] == "Win" else "❌"
+            self.history_textbox.insert("end", f"{outcome_symbol} Target: {entry['target']} | Atts: {entry['attempts']} [{entry['outcome']}]\n")
+        self.history_textbox.see("end")
+        self.history_textbox.configure(state="disabled")
+
+    def update_analytics(self):
+        self.ax.clear()
+        self.ax.set_facecolor(BG)
+        
+        y_data = [run["attempts"] for run in self.history_data[-10:]] # last 10 games
+        x_data = list(range(1, len(y_data) + 1))
+        
+        if y_data:
+            self.ax.plot(x_data, y_data, color=CYAN, marker='o', markersize=6, linewidth=2, label="Attempts")
+            self.ax.set_title("Attempts Trend (Last 10 Games)", color=TEXT, fontsize=10)
+            self.ax.set_ylabel("Attempts Taken", color=TEXT)
+        else:
+            self.ax.text(0.5, 0.5, 'No Game Data Available yet', color=TEXT, ha='center', va='center')
+            
+        self.fig.tight_layout()
+        self.canvas.draw()
+
+    def restart(self):
+        self.entry.configure(state="normal")
+        self.button.configure(state="normal")
+        self.setup_game_parameters()
+        
+        self.progress.set(0)
+        self.result.configure(text="")
+        self.attempt_label.configure(text=f"{self.languages[self.lang]['attempts']} : 0 / {self.max_attempts}")
+        self.hint_lbl.configure(text=f"Enter a number between 1 and {self.range_max}")
+        self.log_history("--- New Game Commenced ---")
+
+    def animate_title(self):
+        current_color = self.title_lbl.cget("text_color")
+        self.title_lbl.configure(text_color=CYAN if current_color == PINK else PINK)
+        self.after(700, self.animate_title)
+
+if __name__ == "__main__":
+    app = CyberGuess()
+    app.mainloop()
